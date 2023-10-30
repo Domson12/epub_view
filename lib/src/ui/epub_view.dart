@@ -14,10 +14,8 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 export 'package:epubx/epubx.dart' hide Image;
 
 part '../epub_controller.dart';
-part '../helpers/epub_view_builders.dart';
 
-const _minTrailingEdge = 0.55;
-const _minLeadingEdge = -0.05;
+part '../helpers/epub_view_builders.dart';
 
 typedef ExternalLinkPressed = void Function(String href);
 
@@ -316,6 +314,60 @@ class _EpubViewState extends State<EpubView> {
         ),
       );
 
+  static Widget _pageBuilder(
+    BuildContext context,
+    EpubViewBuilders builders,
+    EpubBook document,
+    List<EpubChapter> chapters,
+    List<Paragraph> paragraphs,
+    int index,
+    int chapterIndex,
+    int paragraphIndex,
+    ExternalLinkPressed onExternalLinkPressed,
+  ) {
+    if (paragraphs.isEmpty) {
+      return Container();
+    }
+
+    final defaultBuilder = builders as EpubViewBuilders<DefaultBuilderOptions>;
+    final options = defaultBuilder.options;
+
+    return Column(
+      children: <Widget>[
+        if (chapterIndex >= 0 && paragraphIndex == 0)
+          builders.chapterDividerBuilder(chapters[chapterIndex]),
+        Html(
+          data: paragraphs[index].element.outerHtml,
+          onLinkTap: (href, _, __) => onExternalLinkPressed(href!),
+          style: {
+            'html': Style(
+              padding: HtmlPaddings.only(
+                top: (options.paragraphPadding as EdgeInsets?)?.top,
+                right: (options.paragraphPadding as EdgeInsets?)?.right,
+                bottom: (options.paragraphPadding as EdgeInsets?)?.bottom,
+                left: (options.paragraphPadding as EdgeInsets?)?.left,
+              ),
+            ).merge(Style.fromTextStyle(options.textStyle)),
+          },
+          extensions: [
+            TagExtension(
+              tagsToExtend: {"img"},
+              builder: (imageContext) {
+                final url =
+                    imageContext.attributes['src']!.replaceAll('../', '');
+                final content = Uint8List.fromList(
+                    document.Content!.Images![url]!.Content!);
+                return Image(
+                  image: MemoryImage(content),
+                );
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   static Widget _chapterBuilder(
     BuildContext context,
     EpubViewBuilders builders,
@@ -371,21 +423,38 @@ class _EpubViewState extends State<EpubView> {
   }
 
   Widget _buildLoaded(BuildContext context) {
-    return PageView.builder(
-      itemCount: _paragraphs.length,
-      itemBuilder: (BuildContext context, int index) {
-        return widget.builders.chapterBuilder(
-          context,
-          widget.builders,
-          widget.controller._document!,
-          _chapters,
-          _paragraphs,
-          index,
-          _getChapterIndexBy(positionIndex: index),
-          _getParagraphIndexBy(positionIndex: index),
-          _onLinkPressed,
-        );
-      },
+    if (_controller.loadingState.value == EpubViewLoadingState.loading) {
+      return widget.builders.loaderBuilder?.call(context) ?? const SizedBox();
+    }
+
+    if (_controller.loadingState.value == EpubViewLoadingState.error) {
+      return widget.builders.errorBuilder?.call(context, _loadingError!) ??
+          Center(child: Text(_loadingError.toString()));
+    }
+
+    final pageViews = List<Widget>.generate(_paragraphs.length, (pageIndex) {
+      final chapterIndex = _getChapterIndexBy(positionIndex: pageIndex);
+      final paragraphIndex = _getParagraphIndexBy(positionIndex: pageIndex);
+      return PageView(
+        children: [
+          widget.builders.chapterBuilder(
+            context,
+            widget.builders,
+            _controller._document!,
+            _chapters,
+            _paragraphs,
+            pageIndex,
+            chapterIndex,
+            paragraphIndex,
+            _onLinkPressed,
+          ),
+        ],
+      );
+    });
+
+    return PageView(
+      controller: PageController(),
+      children: pageViews,
     );
   }
 
@@ -441,4 +510,3 @@ class _EpubViewState extends State<EpubView> {
     );
   }
 }
-
